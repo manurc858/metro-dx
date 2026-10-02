@@ -1,0 +1,977 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body>
+<title>Termografía Túnel–Estación</title>
+<meta name="description" content="Simulación 3D (three.js) de la temperatura del aire en un túnel de metro y una estación en caverna con equipos de expansión directa.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&family=Archivo+Narrow:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout: control rail (left) · 3D viewport (centre) · instrument readout (right). Stacks to one column on narrow screens. */
+:root{
+  --bg:#0a0e11;
+  --panel:#10161a;
+  --panel-2:#172026;
+  --line:#24323b;
+  --fg:#e2e9ec;
+  --muted:#8d9ea8;
+  --dim:#5f707a;
+  --cold:#66ccff;
+  --hot:#ff8c4a;
+  --ok:#79d9a3;
+  --warn:#f2c14e;
+  --f-display:'Archivo Narrow','Arial Narrow',system-ui,sans-serif;
+  --f-body:'Archivo',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,'Cascadia Mono',Consolas,monospace;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--f-body)}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+#app{display:grid;grid-template-columns:284px minmax(0,1fr) 336px;height:100%}
+aside{background:var(--panel);overflow:auto;padding-block:18px 24px;padding-inline:18px;min-width:0}
+#controls{border-right:1px solid var(--line)}
+#readout{border-left:1px solid var(--line)}
+#viewport{position:relative;min-width:0;overflow:hidden;background:var(--bg)}
+#c3d{display:block;width:100%;height:100%;touch-action:none}
+
+.eyebrow{font:500 11px/1 var(--f-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--cold);margin:0 0 10px}
+h1{font:700 26px/1.02 var(--f-display);letter-spacing:-.01em;margin:0 0 10px;text-wrap:balance}
+.lede{color:var(--muted);font-size:13px;margin:0 0 6px}
+h2{font:600 12px/1 var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+h3{font:600 15px/1.2 var(--f-display);margin:0 0 6px;letter-spacing:.01em}
+.grp{border-top:1px solid var(--line);padding-top:16px;margin-top:16px;display:grid;gap:12px}
+.ctl{display:grid;grid-template-columns:1fr auto;gap:2px 8px;align-items:baseline}
+.ctl label{font-size:13px;color:var(--fg)}
+.ctl output{font:500 12px var(--f-mono);color:var(--cold);font-variant-numeric:tabular-nums}
+.ctl input[type=range]{grid-column:1 / -1;width:100%;accent-color:var(--cold);margin:4px 0 0}
+.hint{font-size:12px;color:var(--dim);margin:-4px 0 0}
+.seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{flex:1;background:transparent;color:var(--muted);border:0;padding:7px 6px;font:500 12px var(--f-body);cursor:pointer}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--panel-2);color:var(--fg);box-shadow:inset 0 -2px 0 var(--cold)}
+.seglbl{font-size:13px;margin-bottom:-6px}
+.chk{display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer}
+.chk input{accent-color:var(--cold);width:15px;height:15px;margin:0}
+button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--cold);outline-offset:2px}
+
+.dxswitch{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);color:var(--fg);font:600 14px var(--f-display);letter-spacing:.02em;cursor:pointer}
+.dxswitch .pill{font:500 11px var(--f-mono);letter-spacing:.08em;padding:4px 8px;border-radius:99px;background:#2a3238;color:var(--muted)}
+.dxswitch[aria-pressed="true"] .pill{background:color-mix(in srgb,var(--cold) 22%,transparent);color:var(--cold)}
+
+/* viewport overlays */
+.ov{position:absolute;z-index:2}
+#topbar{top:12px;left:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;max-width:calc(100% - 24px)}
+.chip{background:color-mix(in srgb,var(--panel) 88%,transparent);border:1px solid var(--line);border-radius:8px;padding:6px 10px;backdrop-filter:blur(6px)}
+#clock{font:500 13px var(--f-mono);font-variant-numeric:tabular-nums}
+#clock small{color:var(--muted);font-size:11px;margin-right:6px;letter-spacing:.08em;text-transform:uppercase}
+.btn{background:var(--panel-2);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font:500 12px var(--f-body);cursor:pointer}
+.btn:hover{border-color:var(--dim)}
+#topbar .seg{background:color-mix(in srgb,var(--panel) 88%,transparent)}
+#views{top:12px;right:12px;display:flex;flex-direction:column;gap:6px}
+#views .btn{text-align:left;background:color-mix(in srgb,var(--panel) 88%,transparent)}
+#legend{left:12px;bottom:12px;width:min(340px,calc(100% - 24px));padding:8px 10px 6px}
+#legend .lt{display:flex;justify-content:space-between;font:500 11px var(--f-mono);color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums}
+#legend .lh{font:500 11px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:5px;display:flex;justify-content:space-between}
+#legbar{display:block;width:100%;height:12px;border-radius:3px}
+#labels{position:absolute;inset:0;pointer-events:none;z-index:1}
+.lbl{position:absolute;left:0;top:0;font:500 11px var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--fg);white-space:nowrap;padding:3px 6px;border-left:2px solid var(--cold);background:rgba(8,12,15,.62);transform-origin:0 0}
+#tip{position:absolute;z-index:3;pointer-events:none;font:500 12px var(--f-mono);background:rgba(8,12,15,.9);border:1px solid var(--line);border-radius:6px;padding:6px 8px;white-space:nowrap}
+#tip b{font-size:15px}
+#loading{position:absolute;inset:0;display:grid;place-items:center;z-index:4;background:var(--bg);color:var(--muted);font:500 13px var(--f-mono)}
+
+/* readout */
+.status{display:flex;align-items:center;gap:8px;font:600 13px var(--f-display);letter-spacing:.02em;padding:8px 10px;border-radius:8px;background:var(--panel-2);border:1px solid var(--line);margin-bottom:14px}
+.status i{width:9px;height:9px;border-radius:50%;background:var(--dim);flex:none}
+.status[data-s="ok"] i{background:var(--ok)} .status[data-s="cool"] i{background:var(--cold)} .status[data-s="warn"] i{background:var(--warn)}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.kpi{background:var(--panel);padding:10px 11px;display:grid;gap:2px;min-width:0}
+.kpi.wide{grid-column:1 / -1}
+.k-label{font:500 10.5px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.k-val{font:600 24px/1.05 var(--f-display);font-variant-numeric:tabular-nums}
+.kpi.wide .k-val{font-size:38px;color:var(--cold)}
+.k-sub{font:400 11.5px var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.k-sub em{font-style:normal;color:var(--hot)}
+.chart{margin-top:18px}
+.chart canvas{display:block;width:100%;height:150px}
+.chart.h canvas{height:130px}
+.leg{display:flex;flex-wrap:wrap;gap:12px;font:400 11px var(--f-mono);color:var(--muted);margin-top:4px}
+.leg span::before{content:"";display:inline-block;width:14px;height:2px;vertical-align:middle;margin-right:5px;background:currentColor}
+.leg .a{color:var(--cold)} .leg .b{color:var(--hot)} .leg .c{color:var(--dim)}
+details{margin-top:18px;border-top:1px solid var(--line);padding-top:12px;font-size:12.5px;color:var(--muted)}
+summary{cursor:pointer;color:var(--fg);font:600 13px var(--f-display);letter-spacing:.02em}
+details ul{padding-left:18px;margin:8px 0 0;display:grid;gap:6px}
+details p{margin:8px 0 0}
+
+@media (max-width:1100px){
+  #app{grid-template-columns:1fr;height:auto}
+  #viewport{height:64vh;min-height:360px;order:0}
+  #readout{order:1;border-left:0;border-top:1px solid var(--line)}
+  #controls{order:2;border-right:0;border-top:1px solid var(--line)}
+  aside{overflow:visible}
+  #views{flex-direction:row;flex-wrap:wrap;top:auto;bottom:92px;right:12px;left:12px}
+}
+@media (max-width:560px){
+  .lbl{display:none}
+  #views .btn{padding:5px 8px}
+}
+</style>
+
+<div id="app">
+  <aside id="controls" aria-label="Parámetros de la simulación">
+    <p class="eyebrow">Metro · climatización DX</p>
+    <h1>Termografía túnel–estación</h1>
+    <p class="lede">Temperatura del aire en 210 m de túnel de vía doble seguidos de una estación en caverna, partiendo de una base de 30 °C y con unidades de expansión directa enfriando la estación.</p>
+
+    <section class="grp" aria-labelledby="g1">
+      <h2 id="g1">Escenario base</h2>
+      <div class="ctl"><label for="tBase">Temperatura base del aire</label><output id="o-tBase"></output><input type="range" id="tBase" min="24" max="34" step="0.5" value="30"></div>
+      <div class="ctl"><label for="tWall">Temperatura de hastiales y terreno</label><output id="o-tWall"></output><input type="range" id="tWall" min="18" max="32" step="0.5" value="30"></div>
+      <div class="ctl"><label for="vAir">Ventilación longitudinal en túnel</label><output id="o-vAir"></output><input type="range" id="vAir" min="0" max="2.5" step="0.1" value="0.5"></div>
+      <div class="ctl"><label for="tph">Trenes por hora y sentido</label><output id="o-tph"></output><input type="range" id="tph" min="0" max="30" step="1" value="15"></div>
+      <div class="ctl"><label for="pax">Pasajeros en andenes</label><output id="o-pax"></output><input type="range" id="pax" min="0" max="1200" step="20" value="400"></div>
+      <div class="ctl"><label for="regen">Frenado regenerativo</label><output id="o-regen"></output><input type="range" id="regen" min="0" max="80" step="5" value="35"></div>
+    </section>
+
+    <section class="grp" aria-labelledby="g2">
+      <h2 id="g2">Equipo de expansión directa</h2>
+      <button type="button" class="dxswitch" id="dxOn" aria-pressed="true"><span>Equipo DX</span><span class="pill" id="dxOnTxt">EN MARCHA</span></button>
+      <div class="ctl"><label for="dxCap">Capacidad frigorífica total</label><output id="o-dxCap"></output><input type="range" id="dxCap" min="50" max="1200" step="25" value="600"></div>
+      <div class="ctl"><label for="dxUnits">Unidades interiores</label><output id="o-dxUnits"></output><input type="range" id="dxUnits" min="2" max="12" step="1" value="8"></div>
+      <div class="ctl"><label for="dxSet">Consigna de retorno</label><output id="o-dxSet"></output><input type="range" id="dxSet" min="18" max="29" step="0.5" value="24"></div>
+      <div class="ctl"><label for="dxSupply">Temperatura de impulsión</label><output id="o-dxSupply"></output><input type="range" id="dxSupply" min="10" max="20" step="0.5" value="14"></div>
+      <div class="ctl"><label for="dxFlow">Caudal por unidad</label><output id="o-dxFlow"></output><input type="range" id="dxFlow" min="1" max="10" step="0.5" value="5"></div>
+      <div class="ctl"><label for="dxShr">Factor de calor sensible</label><output id="o-dxShr"></output><input type="range" id="dxShr" min="0.6" max="1" step="0.05" value="0.8"></div>
+      <div class="ctl"><label for="dxEer">Eficiencia EER</label><output id="o-dxEer"></output><input type="range" id="dxEer" min="2" max="5" step="0.1" value="3.2"></div>
+      <div class="seglbl">Ubicación de evaporadoras</div>
+      <div class="seg" data-key="dxPlace" role="group" aria-label="Ubicación de evaporadoras"><button type="button" data-v="st" aria-pressed="true">Estación</button><button type="button" data-v="mix" aria-pressed="false">Estación + túnel</button></div>
+      <div class="seglbl">Condensadoras</div>
+      <div class="seg" data-key="dxCond" role="group" aria-label="Ubicación de condensadoras"><button type="button" data-v="ext" aria-pressed="true">Exterior (pozo)</button><button type="button" data-v="int" aria-pressed="false">Nicho en túnel</button></div>
+      <p class="hint">Con las condensadoras en el túnel, el calor extraído más el consumo eléctrico vuelve al aire subterráneo.</p>
+    </section>
+
+    <section class="grp" aria-labelledby="g3">
+      <h2 id="g3">Visualización</h2>
+      <div class="seg" data-key="view" role="group" aria-label="Campo mostrado"><button type="button" data-v="A" aria-pressed="true">Con DX</button><button type="button" data-v="B" aria-pressed="false">Sin DX (referencia)</button></div>
+      <label class="chk"><input type="checkbox" id="sHoriz" checked> Plano horizontal</label>
+      <div class="ctl"><label for="hHoriz">Altura del plano</label><output id="o-hHoriz"></output><input type="range" id="hHoriz" min="0.5" max="9.5" step="0.25" value="2.75"></div>
+      <label class="chk"><input type="checkbox" id="sLong" checked> Plano longitudinal</label>
+      <div class="ctl"><label for="zLong">Posición transversal</label><output id="o-zLong"></output><input type="range" id="zLong" min="-8.5" max="8.5" step="0.25" value="-5.5"></div>
+      <label class="chk"><input type="checkbox" id="sCross"> Sección transversal</label>
+      <div class="ctl"><label for="xCross">Posición (PK)</label><output id="o-xCross"></output><input type="range" id="xCross" min="2" max="338" step="2" value="262"></div>
+      <div class="ctl"><label for="sliceOp">Opacidad de planos</label><output id="o-sliceOp"></output><input type="range" id="sliceOp" min="0.2" max="1" step="0.05" value="0.78"></div>
+      <label class="chk"><input type="checkbox" id="particles" checked> Partículas de aire</label>
+      <label class="chk"><input type="checkbox" id="thermal"> Termografía de superficies</label>
+      <label class="chk"><input type="checkbox" id="cut" checked> Corte del revestimiento</label>
+      <label class="chk"><input type="checkbox" id="labels" checked> Rótulos</label>
+    </section>
+  </aside>
+
+  <main id="viewport">
+    <canvas id="c3d" aria-label="Modelo 3D del túnel y la estación con el campo de temperaturas"></canvas>
+    <div id="labels"></div>
+    <div id="tip" hidden></div>
+    <div id="topbar" class="ov">
+      <div class="chip" id="clock"><small>Tiempo simulado</small><span id="clockT">00:00</span></div>
+      <button type="button" class="btn" id="play">Pausa</button>
+      <div class="seg" data-key="speed" role="group" aria-label="Velocidad de simulación"><button type="button" data-v="1" aria-pressed="false">1×</button><button type="button" data-v="10" aria-pressed="true">10×</button><button type="button" data-v="30" aria-pressed="false">30×</button><button type="button" data-v="60" aria-pressed="false">60×</button></div>
+      <button type="button" class="btn" id="ff">+10 min</button>
+      <button type="button" class="btn" id="reset">Reiniciar</button>
+    </div>
+    <div id="views" class="ov">
+      <button type="button" class="btn" data-view="general">Vista general</button>
+      <button type="button" class="btn" data-view="anden">Andén</button>
+      <button type="button" class="btn" data-view="tunel">Túnel</button>
+      <button type="button" class="btn" data-view="seccion">Sección</button>
+    </div>
+    <div id="legend" class="ov chip">
+      <div class="lh"><span>Temperatura del aire</span><span id="legField">Con DX</span></div>
+      <canvas id="legbar" width="340" height="12"></canvas>
+      <div class="lt"><span>18</span><span>21</span><span>24</span><span>27</span><span>30</span><span>33</span><span>36 °C</span></div>
+    </div>
+    <div id="loading">Calculando el régimen térmico inicial…</div>
+  </main>
+
+  <aside id="readout" aria-label="Resultados">
+    <div class="status" id="status" data-s="cool"><i></i><span id="statusTxt">Enfriando</span></div>
+    <div class="kpis">
+      <div class="kpi wide"><span class="k-label">Andén · aire a 1,7 m</span><span class="k-val" id="kPlat">—</span><span class="k-sub" id="kPlatSub">—</span></div>
+      <div class="kpi"><span class="k-label">Túnel · 1,7 m</span><span class="k-val" id="kTun">—</span><span class="k-sub" id="kTunSub">—</span></div>
+      <div class="kpi"><span class="k-label">Bóveda estación</span><span class="k-val" id="kTop">—</span><span class="k-sub" id="kTopSub">—</span></div>
+      <div class="kpi"><span class="k-label">Frío sensible</span><span class="k-val" id="kQ">—</span><span class="k-sub" id="kQSub">—</span></div>
+      <div class="kpi"><span class="k-label">Consumo eléctrico</span><span class="k-val" id="kE">—</span><span class="k-sub" id="kESub">—</span></div>
+      <div class="kpi"><span class="k-label">Calor condensadoras</span><span class="k-val" id="kC">—</span><span class="k-sub" id="kCSub">—</span></div>
+      <div class="kpi"><span class="k-label">Aire en túnel</span><span class="k-val" id="kU">—</span><span class="k-sub" id="kUSub">—</span></div>
+    </div>
+
+    <section class="chart">
+      <h3>Perfil longitudinal a 1,7 m</h3>
+      <canvas id="cProf" aria-label="Perfil de temperatura a lo largo del túnel y la estación"></canvas>
+      <div class="leg"><span class="a">Con DX</span><span class="b">Sin DX</span><span class="c">Base</span></div>
+    </section>
+    <section class="chart h">
+      <h3>Evolución en el andén</h3>
+      <canvas id="cHist" aria-label="Evolución temporal de la temperatura media en el andén"></canvas>
+      <div class="leg"><span class="a">Con DX</span><span class="b">Sin DX</span><span class="c">Consigna</span></div>
+    </section>
+
+    <details>
+      <summary>Modelo y supuestos</summary>
+      <ul>
+        <li>Malla 3D de 2 × 1 × 1 m (<span id="nCells"></span> celdas de aire). Advección por la corriente longitudinal del túnel (ventilación más efecto pistón de los trenes), difusión turbulenta y mezcla convectiva vertical: el aire caliente asciende y el frío desciende.</li>
+        <li>Intercambio con hastiales y andén con h = 5 W/m²·K hacia la temperatura del terreno.</li>
+        <li>Trenes de 4 coches (71,5 m, 160 t) a 70 km/h, frenando a 1,0 m/s². El calor de frenado no regenerado, las pérdidas de tracción y la resistencia al avance se liberan bajo bastidor. Los equipos auxiliares y la climatización de cada tren aportan 100 kW en cubierta.</li>
+        <li>Pasajeros: 75 W sensibles por persona. Alumbrado y equipos de la estación: 25 kW.</li>
+        <li>Cada unidad DX recircula el aire de su zona y lo impulsa a la temperatura fijada, limitada por su capacidad sensible (capacidad × factor de calor sensible) y modulada por la consigna. Consumo = frío total / EER. Calor en condensadoras = frío total + consumo.</li>
+        <li>La referencia «Sin DX» se calcula en paralelo con los mismos trenes y cargas.</li>
+      </ul>
+      <p>Es un modelo de orden reducido para estudiar tendencias y órdenes de magnitud. No sustituye un cálculo CFD o SES de proyecto.</p>
+    </details>
+  </aside>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function(){
+'use strict';
+const $=s=>document.querySelector(s);
+if(!window.THREE||!THREE.OrbitControls){$('#loading').textContent='No se pudo cargar three.js. Revisa la conexión a internet.';return;}
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const fmt=(v,d=1)=>Number(v).toLocaleString('es-ES',{minimumFractionDigits:d,maximumFractionDigits:d});
+const reduceMotion=!!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);
+const V3=(x,y,z)=>new THREE.Vector3(x,y,z);
+
+/* ================= Parameters ================= */
+const P={tBase:30,tWall:30,vAir:0.5,tph:15,pax:400,regen:35,
+  dxOn:true,dxCap:600,dxUnits:8,dxSupply:14,dxFlow:5,dxShr:0.8,dxEer:3.2,dxSet:24,dxPlace:'st',dxCond:'ext',
+  speed:10,playing:true,view:'A',sLong:true,sHoriz:true,sCross:false,zLong:-5.5,hHoriz:2.75,xCross:262,sliceOp:0.78,
+  particles:true,thermal:false,cut:true,labels:true};
+
+/* ================= Domain geometry ================= */
+const L=340,X_ST0=210,X_ST1=320,SHAFT_X=196;
+const PLAT_Y=1.05,PLAT_EDGE=3.4,TRACK_Z=1.9;
+const isStationX=x=>x>=X_ST0&&x<X_ST1;
+function tunnelTop(z){const a=Math.abs(z);return a>4.5?-1:3+Math.sqrt(Math.max(0,20.25-a*a));}
+function stationTop(z){const a=Math.abs(z);return a>9?-1:2+9.5*Math.sqrt(Math.max(0,1-a*a/81));}
+function inside(x,y,z){
+  if(y<0)return false;
+  if(isStationX(x)){const t=stationTop(z);if(t<0||y>t)return false;if(Math.abs(z)>=PLAT_EDGE&&y<PLAT_Y)return false;return true;}
+  const t=tunnelTop(z);return t>=0&&y<=t;
+}
+
+/* ================= Grid ================= */
+const DX=2,NX=170,NZ=18,DZ=1,Z0=-9,NY=12,DY=1;
+const SL=NY*NZ,N=NX*SL,VC=DX*DY*DZ,RHOCP=1206,CAPC=RHOCP*VC,INVCAP=1/CAPC;
+const id3=(i,j,k)=>i*SL+j*NZ+k;
+const cxI=i=>(i+.5)*DX,cyJ=j=>(j+.5)*DY,czK=k=>Z0+(k+.5)*DZ;
+const FLUID=new Uint8Array(N);
+for(let i=0;i<NX;i++)for(let j=0;j<NY;j++)for(let k=0;k<NZ;k++)FLUID[id3(i,j,k)]=inside(cxI(i),cyJ(j),czK(k))?1:0;
+const tmpCells=[],SLICE0=new Int32Array(NX+1),AREA=new Float32Array(NX);
+for(let i=0;i<NX;i++){SLICE0[i]=tmpCells.length;let n=0;for(let j=0;j<NY;j++)for(let k=0;k<NZ;k++){const c=id3(i,j,k);if(FLUID[c]){tmpCells.push(c);n++;}}AREA[i]=n*DY*DZ;}
+SLICE0[NX]=tmpCells.length;
+const CELLS=Int32Array.from(tmpCells),NC=CELLS.length;
+const CI=new Int32Array(NC);for(let i=0;i<NX;i++)for(let m=SLICE0[i];m<SLICE0[i+1];m++)CI[m]=i;
+const XM=new Int32Array(N).fill(-1),XP=new Int32Array(N).fill(-1),YM=new Int32Array(N).fill(-1),YP=new Int32Array(N).fill(-1),ZM=new Int32Array(N).fill(-1),ZP=new Int32Array(N).fill(-1);
+const WR=new Float32Array(N),H_WALL=5;
+for(let m=0;m<NC;m++){
+  const c=CELLS[m],i=(c/SL)|0,r=c-i*SL,j=(r/NZ)|0,k=r-j*NZ;let wa=0;
+  if(i===0)XM[c]=-2;else if(FLUID[c-SL])XM[c]=c-SL;else wa+=DY*DZ;
+  if(i===NX-1)XP[c]=-2;else if(FLUID[c+SL])XP[c]=c+SL;else wa+=DY*DZ;
+  if(j>0&&FLUID[c-NZ])YM[c]=c-NZ;else wa+=DX*DZ;
+  if(j<NY-1&&FLUID[c+NZ])YP[c]=c+NZ;else wa+=DX*DZ;
+  if(k>0&&FLUID[c-1])ZM[c]=c-1;else wa+=DX*DY;
+  if(k<NZ-1&&FLUID[c+1])ZP[c]=c+1;else wa+=DX*DY;
+  WR[c]=H_WALL*wa*INVCAP;
+}
+/* nearest fluid cell (same slice) for display of solid cells */
+const DISP=new Int32Array(N);
+for(let i=0;i<NX;i++)for(let j=0;j<NY;j++)for(let k=0;k<NZ;k++){
+  const c=id3(i,j,k);if(FLUID[c]){DISP[c]=c;continue;}
+  let best=-1,bd=1e9;
+  for(let r=1;r<14&&best<0;r++)for(let dj=-r;dj<=r;dj++)for(let dk=-r;dk<=r;dk++){
+    if(Math.max(Math.abs(dj),Math.abs(dk))!==r)continue;const jj=j+dj,kk=k+dk;
+    if(jj<0||jj>=NY||kk<0||kk>=NZ)continue;const cc=id3(i,jj,kk);
+    if(FLUID[cc]){const d=dj*dj+dk*dk;if(d<bd){bd=d;best=cc;}}
+  }
+  DISP[c]=best<0?CELLS[SLICE0[i]]:best;
+}
+/* cell groups */
+const EYE=[],PLAT=[],TUN=[],TOPST=[],TOPTU=[],PAXC=[],COND=[];
+for(let i=0;i<NX;i++){
+  const st=isStationX(cxI(i)),je=st?2:1,row=[];
+  for(let k=0;k<NZ;k++){
+    const c=id3(i,je,k);if(FLUID[c]){row.push(c);if(st&&Math.abs(czK(k))>PLAT_EDGE)PLAT.push(c);if(!st&&cxI(i)<X_ST0)TUN.push(c);}
+    let top=-1;for(let j=NY-1;j>=0;j--)if(FLUID[id3(i,j,k)]){top=id3(i,j,k);break;}
+    if(top>=0){if(st)TOPST.push(top);else TOPTU.push(top);}
+    if(st&&Math.abs(czK(k))>PLAT_EDGE)for(let j=1;j<=2;j++){const cc=id3(i,j,k);if(FLUID[cc])PAXC.push(cc);}
+    const x=cxI(i),z=czK(k);if(x>=98&&x<=112&&z<=-2&&z>=-4.6)for(let j=3;j<=6;j++){const cc=id3(i,j,k);if(FLUID[cc])COND.push(cc);}
+  }
+  EYE.push(Int32Array.from(row));
+}
+const ROOF=[];for(const c of TOPST){const r=c%SL,j=(r/NZ)|0;if(j>=8)ROOF.push(c);}
+
+/* ================= Heat sources ================= */
+const SRC_STATIC=new Float32Array(N),SRC=new Float32Array(N);
+function rebuildStatic(){
+  SRC_STATIC.fill(0);
+  const wp=P.pax*75/PAXC.length;for(const c of PAXC)SRC_STATIC[c]+=wp;
+  const wl=25e3/TOPST.length;for(const c of TOPST)SRC_STATIC[c]+=wl;
+  const wt=6e3/TOPTU.length;for(const c of TOPTU)SRC_STATIC[c]+=wt;
+}
+
+/* ================= Trains ================= */
+const TR={M:160e3,vmax:19.4,dec:1.0,acc:0.9,dwell:25,aux:100e3,len:71.5};
+const resist=v=>2500+6*v*v;
+let trains=[],spawnT=[0,0],uAir=P.vAir;
+const BAND=[[],[]];
+for(let k=0;k<NZ;k++){const z=czK(k);if(Math.abs(z+TRACK_Z)<=1.5)BAND[0].push(k);if(Math.abs(z-TRACK_Z)<=1.5)BAND[1].push(k);}
+function trainX(tr,s){return tr.dir>0?[s-TR.len,s]:[L-s,L-s+TR.len];}
+function makeTrain(dir){return{dir,s:-80,sPrev:-80,v:TR.vmax,phase:'run',tw:0,sStop:dir>0?315:L-215,pu:0,mesh:null,done:false};}
+function stepTrain(tr,dt){
+  tr.sPrev=tr.s;const M=TR.M;
+  if(tr.phase==='run'){tr.s+=tr.v*dt;tr.pu=resist(tr.v)*tr.v;if(tr.s>=tr.sStop-tr.v*tr.v/(2*TR.dec))tr.phase='brake';}
+  else if(tr.phase==='brake'){const v0=tr.v,v1=Math.max(0,v0-TR.dec*dt),vm=.5*(v0+v1);tr.s+=vm*dt;tr.v=v1;tr.pu=M*TR.dec*vm*(1-P.regen/100);
+    if(v1<=0||tr.s>=tr.sStop){tr.s=Math.min(tr.s,tr.sStop);tr.v=0;tr.phase='dwell';tr.tw=0;}}
+  else if(tr.phase==='dwell'){tr.pu=0;tr.tw+=dt;if(tr.tw>=TR.dwell)tr.phase='acc';}
+  else{const v0=tr.v,v1=Math.min(TR.vmax,v0+TR.acc*dt);tr.s+=.5*(v0+v1)*dt;tr.v=v1;tr.pu=(v1<TR.vmax?0.15*M*TR.acc*v1:0)+resist(v1)*v1;if(tr.s-TR.len>L+10)tr.done=true;}
+}
+function depRow(i,j,band,W){let n=0;for(const k of band)if(FLUID[id3(i,j,k)])n++;if(!n)return;const w=W/n;for(const k of band){const c=id3(i,j,k);if(FLUID[c])SRC[c]+=w;}}
+function depositTrains(){
+  for(const tr of trains){
+    const [lo,hi]=trainX(tr,tr.s);if(hi<0||lo>L)continue;
+    const i0=Math.max(0,Math.floor(lo/DX)),i1=Math.min(NX-1,Math.floor(hi/DX)),f=DX/TR.len,band=BAND[tr.dir>0?0:1];
+    for(let i=i0;i<=i1;i++){depRow(i,0,band,tr.pu*f);depRow(i,4,band,TR.aux*f);}
+  }
+}
+function updatePiston(dt){
+  let p=0;for(const tr of trains){const [lo,hi]=trainX(tr,tr.s);const ov=Math.max(0,Math.min(hi,X_ST0)-Math.max(lo,0));p+=tr.dir*tr.v*ov/TR.len;}
+  const tgt=clamp(P.vAir+0.045*p,-2.5,2.5);uAir+=(tgt-uAir)*Math.min(1,dt/20);
+}
+
+/* ================= DX units (simulation side) ================= */
+let units=[];const PLUME=new Int16Array(N).fill(-1);
+function unitLayout(){
+  const n=P.dxUnits,nT=P.dxPlace==='mix'?2*Math.max(1,Math.round(n/6)):0,nS=n-nT,out=[];
+  const mL=Math.ceil(nS/2),mR=Math.floor(nS/2);
+  let qL=0,qR=0;
+  for(let q=0;q<nS;q++){const side=q%2===0?-1:1;const m=side<0?mL:mR;const idx=side<0?qL++:qR++;
+    out.push({where:'S',x:216+(idx+(side<0?0.3:0.7))*(72/m),y:7.6,z:side*6.4});}
+  for(let q=0;q<nT;q++){const side=q%2===0?-1:1;out.push({where:'T',x:188-22*Math.floor(q/2)-(side>0?9:0),y:5.4,z:side*2.8});}
+  return out;
+}
+function buildUnitCells(u,ui){
+  const iu=Math.floor(u.x/DX),cells=[],w=[],ctrl=[];
+  const st=u.where==='S',band=st?2.0:1.6,j0=st?1:0,j1=st?7:5,jc=st?3:2;
+  for(let i=iu-2;i<=iu+2;i++){if(i<0||i>=NX)continue;
+    for(let k=0;k<NZ;k++){if(Math.abs(czK(k)-u.z)>band)continue;
+      for(let j=j0;j<=j1;j++){const c=id3(i,j,k);if(!FLUID[c])continue;cells.push(c);w.push(1+0.6*(j1-j)/(j1-j0));if(j<=jc)ctrl.push(c);PLUME[c]=ui;}}}
+  const s=w.reduce((a,b)=>a+b,0);
+  u.cells=Int32Array.from(cells);u.w=Float32Array.from(w.map(v=>v/s));u.ctrl=Int32Array.from(ctrl.length?ctrl:cells);
+}
+function applyDX(T,Tn,dt){
+  if(!units.length)return 0;
+  const capU=P.dxCap*1000*P.dxShr/units.length,Vd=P.dxFlow,Ts=P.dxSupply;let tot=0;
+  for(const u of units){
+    let tc=0;for(let m=0;m<u.ctrl.length;m++)tc+=T[u.ctrl[m]];tc/=u.ctrl.length;u.tc=tc;
+    const tgt=P.dxOn?clamp((tc-(P.dxSet-0.5))/1.5,0,1):0;
+    u.frac+=(tgt-u.frac)*Math.min(1,dt/40);
+    if(u.frac<0.003){u.q=0;continue;}
+    let qp=0;const cells=u.cells,w=u.w;
+    for(let m=0;m<cells.length;m++){const d=T[cells[m]]-Ts;if(d>0)qp+=RHOCP*Vd*w[m]*d;}
+    const qmax=capU*u.frac,s=qp>qmax?qmax/qp:1;
+    for(let m=0;m<cells.length;m++){const c=cells[m],d=T[c]-Ts;if(d>0){const r=Math.min(0.5,dt*s*Vd*w[m]/VC);Tn[c]-=r*d;}}
+    u.q=Math.min(qp,qmax);tot+=u.q;
+  }
+  return tot;
+}
+
+/* ================= Thermal solver ================= */
+const KX=0.3/(DX*DX),KZ=0.05/(DZ*DZ),KST=0.006,KCV=0.12;
+class Sim{
+  constructor(){this.T=new Float32Array(N);this.Tn=new Float32Array(N);this.avg=new Float32Array(NX);this.q=0;}
+  reset(t){this.T.fill(t);this.Tn.fill(t);this.avg.fill(t);this.q=0;}
+  step(dt,Tin,Tw,u,src,dx,condW){
+    const T=this.T,Tn=this.Tn,avg=this.avg;
+    for(let i=0;i<NX;i++){let s=0;const a=SLICE0[i],b=SLICE0[i+1];for(let m=a;m<b;m++)s+=T[CELLS[m]];avg[i]=s/(b-a);}
+    const Q=u*AREA[0];
+    for(let m=0;m<NC;m++){
+      const c=CELLS[m],i=CI[m],t=T[c],ui=Q/AREA[i];let d=0,n;
+      if(ui>0){n=XM[c];const up=n>=0?T[n]:(n===-2?Tin:avg[i-1]);d+=ui*(up-t)/DX;}
+      else if(ui<0){n=XP[c];const up=n>=0?T[n]:(n===-2?Tin:avg[i+1]);d-=ui*(up-t)/DX;}
+      n=XM[c];if(n>=0)d+=KX*(T[n]-t);
+      n=XP[c];if(n>=0)d+=KX*(T[n]-t);
+      n=ZM[c];if(n>=0)d+=KZ*(T[n]-t);
+      n=ZP[c];if(n>=0)d+=KZ*(T[n]-t);
+      n=YM[c];if(n>=0){const b=T[n];d+=(b>t?KCV:KST)*(b-t);}
+      n=YP[c];if(n>=0){const a=T[n];d+=(t>a?KCV:KST)*(a-t);}
+      d+=WR[c]*(Tw-t)+src[c]*INVCAP;
+      Tn[c]=t+dt*d;
+    }
+    if(condW>0){const w=dt*condW*INVCAP/COND.length;for(const c of COND)Tn[c]+=w;}
+    this.q=dx?applyDX(T,Tn,dt):0;
+    this.T=Tn;this.Tn=T;
+  }
+}
+const simA=new Sim(),simB=new Sim();
+const meanOf=(sim,arr)=>{let s=0;for(let m=0;m<arr.length;m++)s+=sim.T[arr[m]];return s/arr.length;};
+const DT=0.5,PREROLL=1500,WARM=240;
+let simTime=0,nextHist=0,lastCond=0;const HIST=[];
+function simStep(dt,onlyB){
+  const H=P.tph>0?3600/P.tph:1e9;
+  for(let d=0;d<2;d++){spawnT[d]=Math.min(spawnT[d],H);spawnT[d]-=dt;if(spawnT[d]<=0){spawnT[d]+=H;if(P.tph>0)trains.push(makeTrain(d===0?1:-1));}}
+  for(const tr of trains)stepTrain(tr,dt);
+  if(trains.some(t=>t.done)){for(const t of trains)if(t.done&&t.mesh)scene.remove(t.mesh);trains=trains.filter(t=>!t.done);}
+  updatePiston(dt);
+  SRC.set(SRC_STATIC);depositTrains();
+  simB.step(dt,P.tBase,P.tWall,uAir,SRC,false,0);
+  if(!onlyB){
+    simA.step(dt,P.tBase,P.tWall,uAir,SRC,true,P.dxCond==='int'?lastCond:0);
+    lastCond=simA.q/P.dxShr*(1+1/P.dxEer);
+  }
+  simTime+=dt;
+  if(!onlyB&&simTime>=nextHist){HIST.push({t:simTime,a:meanOf(simA,PLAT),b:meanOf(simB,PLAT)});nextHist+=10;if(HIST.length>2000)HIST.shift();}
+}
+function resetSim(){
+  simA.reset(P.tBase);simB.reset(P.tBase);
+  for(const t of trains)if(t.mesh)scene.remove(t.mesh);
+  trains=[];const H=P.tph>0?3600/P.tph:0;spawnT=[0,H/2];uAir=P.vAir;lastCond=0;
+  for(const u of units){u.frac=0;u.q=0;}
+  HIST.length=0;simTime=-PREROLL;
+  while(simTime<0)simStep(DT,true);
+  simA.T.set(simB.T);simA.avg.set(simB.avg);simTime=0;nextHist=0;
+  for(let n=0;n<WARM/DT;n++)simStep(DT,false);
+}
+
+/* ================= Colour map ================= */
+const TMIN=18,TMAX=36;
+function turbo(x){x=clamp(x,0,1);
+  const r=0.13572138+x*(4.61539260+x*(-42.66032258+x*(132.13108234+x*(-152.94239396+x*59.28637943))));
+  const g=0.09140261+x*(2.19418839+x*(4.84296658+x*(-14.18503333+x*(4.27729857+x*2.82956604))));
+  const b=0.10667330+x*(12.64194608+x*(-60.58204836+x*(110.36276771+x*(-89.90310912+x*27.34824973))));
+  return [clamp(r,0,1),clamp(g,0,1),clamp(b,0,1)];}
+const LUTL=new Float32Array(768);
+for(let n=0;n<256;n++){const c=turbo(n/255);for(let q=0;q<3;q++)LUTL[n*3+q]=Math.pow(c[q],2.2);}
+const tI=T=>{const v=Math.round((T-TMIN)/(TMAX-TMIN)*255);return v<0?0:v>255?255:v;};
+(function(){const cv=$('#legbar'),g=cv.getContext('2d');for(let x=0;x<cv.width;x++){const c=turbo(x/(cv.width-1));g.fillStyle=`rgb(${c[0]*255|0},${c[1]*255|0},${c[2]*255|0})`;g.fillRect(x,0,1,cv.height);}})();
+
+/* ================= Renderer & scene ================= */
+const canvas=$('#c3d'),vp=$('#viewport');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+renderer.outputEncoding=THREE.sRGBEncoding;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.2;
+renderer.localClippingEnabled=true;
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x090c0f);
+scene.fog=new THREE.FogExp2(0x090c0f,0.0016);
+const camera=new THREE.PerspectiveCamera(46,1,0.1,3000);
+const controls=new THREE.OrbitControls(camera,canvas);
+controls.enableDamping=true;controls.dampingFactor=0.08;controls.maxDistance=650;controls.minDistance=0.5;
+camera.position.set(150,48,92);controls.target.set(232,3,-1);
+
+const hemi=new THREE.HemisphereLight(0xbccbd8,0x2b2621,0.6);scene.add(hemi);
+const keyL=new THREE.DirectionalLight(0xffffff,0.35);keyL.position.set(-60,120,140);scene.add(keyL);
+for(const x of [228,265,302]){const l=new THREE.PointLight(0xfff0d8,1.15,75,1.3);l.position.set(x,9.5,0);scene.add(l);}
+for(const x of [60,150]){const l=new THREE.PointLight(0xffe0b0,0.7,70,1.4);l.position.set(x,5,0);scene.add(l);}
+
+const cutPlane=new THREE.Plane(V3(0,0,-1),1.0);
+const trainClip=[new THREE.Plane(V3(1,0,0),0),new THREE.Plane(V3(-1,0,0),L)];
+const CLIPM=[];
+function clipMat(m){CLIPM.push(m);m.clippingPlanes=P.cut?[cutPlane]:[];return m;}
+function applyCut(){for(const m of CLIPM){m.clippingPlanes=P.cut?[cutPlane]:[];m.needsUpdate=true;}}
+
+/* textures */
+const maxAniso=renderer.capabilities.getMaxAnisotropy();
+function ctex(w,h,draw,linear){const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.encoding=linear?THREE.LinearEncoding:THREE.sRGBEncoding;t.anisotropy=maxAniso;return t;}
+function rnd(a){let s=a;return()=>{s=(s*16807)%2147483647;return(s-1)/2147483646;};}
+function speckle(g,w,h,base,n,amp,size,seed){const R=rnd(seed);g.fillStyle=base;g.fillRect(0,0,w,h);
+  for(let q=0;q<n;q++){const v=(R()-.5)*amp;g.fillStyle=v>0?`rgba(255,255,255,${v})`:`rgba(0,0,0,${-v})`;const s=R()*size+.6;g.fillRect(R()*w,R()*h,s,s);}}
+function blotch(g,w,h,n,alpha,rmax,seed){const R=rnd(seed);for(let q=0;q<n;q++){const x=R()*w,y=R()*h,r=20+R()*rmax;const gr=g.createRadialGradient(x,y,0,x,y,r);const dark=R()<.65;gr.addColorStop(0,dark?`rgba(30,26,22,${alpha})`:`rgba(255,250,240,${alpha*.6})`);gr.addColorStop(1,'rgba(0,0,0,0)');g.fillStyle=gr;g.fillRect(x-r,y-r,2*r,2*r);}}
+const texStation=ctex(512,512,(g,w,h)=>{speckle(g,w,h,'#a7a298',9000,.16,2,7);blotch(g,w,h,16,.10,110,3);
+  g.strokeStyle='rgba(58,54,48,.6)';g.lineWidth=3;for(let a=0;a<=w;a+=256){g.beginPath();g.moveTo(a,0);g.lineTo(a,h);g.stroke();}
+  g.lineWidth=2;for(let b=0;b<=h;b+=128){g.beginPath();g.moveTo(0,b);g.lineTo(w,b);g.stroke();}
+  g.fillStyle='rgba(40,36,32,.5)';for(let a=0;a<w;a+=256)for(let b=64;b<h;b+=128){g.beginPath();g.arc(a+128,b,4,0,7);g.fill();}});
+const texTunnel=ctex(512,512,(g,w,h)=>{speckle(g,w,h,'#7a766e',14000,.22,2.5,11);blotch(g,w,h,26,.16,120,5);
+  const R=rnd(9);for(let q=0;q<10;q++){const x=R()*w;const gr=g.createLinearGradient(x,0,x,h);gr.addColorStop(0,'rgba(40,34,26,.18)');gr.addColorStop(1,'rgba(40,34,26,0)');g.fillStyle=gr;g.fillRect(x,0,6+R()*20,h*(.3+R()*.7));}});
+const texFloor=ctex(256,256,(g,w,h)=>{speckle(g,w,h,'#55534e',5000,.2,2,13);blotch(g,w,h,10,.18,70,17);});
+const texPlat=ctex(512,512,(g,w,h)=>{speckle(g,w,h,'#b8b3a8',12000,.14,1.6,19);g.strokeStyle='rgba(70,66,60,.45)';g.lineWidth=2;
+  for(let a=0;a<=w;a+=128){g.beginPath();g.moveTo(a,0);g.lineTo(a,h);g.stroke();g.beginPath();g.moveTo(0,a);g.lineTo(w,a);g.stroke();}});
+const texGrille=ctex(128,64,(g,w,h)=>{g.fillStyle='#d3d7d9';g.fillRect(0,0,w,h);g.fillStyle='#7f868c';for(let y=8;y<h-6;y+=5)g.fillRect(8,y,w-16,2);g.strokeStyle='#9aa1a6';g.strokeRect(1,1,w-2,h-2);});
+const texFan=ctex(128,128,(g)=>{g.fillStyle='#1b1f22';g.beginPath();g.arc(64,64,63,0,7);g.fill();g.fillStyle='#59626a';
+  for(let b=0;b<5;b++){g.save();g.translate(64,64);g.rotate(b*Math.PI*2/5);g.beginPath();g.ellipse(28,0,26,9,.45,0,7);g.fill();g.restore();}
+  g.strokeStyle='rgba(160,170,176,.6)';g.lineWidth=1.5;for(let r=18;r<64;r+=9){g.beginPath();g.arc(64,64,r,0,7);g.stroke();}});
+const texFade=ctex(4,64,(g,w,h)=>{const gr=g.createLinearGradient(0,0,0,h);gr.addColorStop(0,'#fff');gr.addColorStop(.55,'#777');gr.addColorStop(1,'#000');g.fillStyle=gr;g.fillRect(0,0,w,h);},true);
+const texDot=ctex(64,64,(g)=>{const gr=g.createRadialGradient(32,32,0,32,32,32);gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(.45,'rgba(255,255,255,.75)');gr.addColorStop(1,'rgba(255,255,255,0)');g.fillStyle=gr;g.fillRect(0,0,64,64);});
+
+/* materials */
+const mStation=clipMat(new THREE.MeshStandardMaterial({map:texStation,roughness:.88,metalness:0}));
+const mTunnel=clipMat(new THREE.MeshStandardMaterial({map:texTunnel,roughness:.95,metalness:0}));
+const mHead=clipMat(new THREE.MeshStandardMaterial({map:texStation,roughness:.9,side:THREE.DoubleSide}));
+const mRib=clipMat(new THREE.MeshStandardMaterial({color:0x8f897f,roughness:.85}));
+const mShaft=clipMat(new THREE.MeshStandardMaterial({map:texStation,roughness:.9,side:THREE.DoubleSide,color:0xcfcac2}));
+const mLightClip=clipMat(new THREE.MeshStandardMaterial({color:0xfff5e6,emissive:0xfff1da,emissiveIntensity:1.6}));
+const mFloor=new THREE.MeshStandardMaterial({map:texFloor,roughness:.95});
+const mPlat=new THREE.MeshStandardMaterial({map:texPlat,roughness:.55,metalness:.05});
+const mPlatSide=new THREE.MeshStandardMaterial({color:0x6e6b65,roughness:.9});
+const mTactile=new THREE.MeshStandardMaterial({color:0xe0b43a,roughness:.7});
+const mSteel=new THREE.MeshStandardMaterial({color:0xb9c0c6,metalness:.55,roughness:.32});
+const mRail=new THREE.MeshStandardMaterial({color:0x9a9da0,metalness:.75,roughness:.35});
+const mSleeper=new THREE.MeshStandardMaterial({color:0x8a8780,roughness:.9});
+const mWire=new THREE.MeshStandardMaterial({color:0x6b4a2c,metalness:.6,roughness:.4});
+const mGlass=new THREE.MeshStandardMaterial({color:0x9fd6e4,transparent:true,opacity:.18,roughness:.1,metalness:.1,depthWrite:false,side:THREE.DoubleSide});
+const mUnit=new THREE.MeshStandardMaterial({map:texGrille,roughness:.5,metalness:.2});
+const mUnitDark=new THREE.MeshStandardMaterial({color:0x2a3034,roughness:.6});
+const mCopper=new THREE.MeshStandardMaterial({color:0xb87333,metalness:.7,roughness:.35});
+const mInsul=new THREE.MeshStandardMaterial({color:0x1d2124,roughness:.9});
+const mFan=new THREE.MeshStandardMaterial({map:texFan,roughness:.6,side:THREE.DoubleSide});
+const mTunLight=new THREE.MeshStandardMaterial({color:0xfff2dc,emissive:0xffe6be,emissiveIntensity:1.4});
+const thermalClip=clipMat(new THREE.MeshLambertMaterial({vertexColors:true}));
+const thermalFree=new THREE.MeshLambertMaterial({vertexColors:true});
+
+/* ---------- shell geometry ---------- */
+function prof(pts){let s=0;return pts.map((p,i)=>{if(i>0){const q=pts[i-1];s+=Math.hypot(p[0]-q[0],p[1]-q[1]);}return{z:p[0],y:p[1],s};});}
+function tunnelPts(y0){const a=[[-4.5,y0],[-4.5,1.5],[-4.5,3]];for(let n=1;n<40;n++){const t=Math.PI-Math.PI*n/40;a.push([4.5*Math.cos(t),3+4.5*Math.sin(t)]);}a.push([4.5,3],[4.5,1.5],[4.5,y0]);return a;}
+function stationPts(y0){const a=[[-9,y0],[-9,1],[-9,2]];for(let n=1;n<60;n++){const t=Math.PI-Math.PI*n/60;a.push([9*Math.cos(t),2+9.5*Math.sin(t)]);}a.push([9,2],[9,1],[9,y0]);return a;}
+function shellGeo(pr,x0,x1,step,tu,tv){
+  const na=Math.max(1,Math.round((x1-x0)/step)),np=pr.length;
+  const pos=new Float32Array((na+1)*np*3),uv=new Float32Array((na+1)*np*2),ind=[];
+  for(let a=0;a<=na;a++){const x=x0+(x1-x0)*a/na;for(let p=0;p<np;p++){const o=a*np+p;pos[o*3]=x;pos[o*3+1]=pr[p].y;pos[o*3+2]=pr[p].z;uv[o*2]=x/tu;uv[o*2+1]=pr[p].s/tv;}}
+  for(let a=0;a<na;a++)for(let p=0;p<np-1;p++){const v0=a*np+p,v1=v0+1,v2=v0+np,v3=v2+1;ind.push(v0,v2,v1,v1,v2,v3);}
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(pos,3));g.setAttribute('uv',new THREE.BufferAttribute(uv,2));g.setIndex(ind);g.computeVertexNormals();
+  let top=0;for(let p=0;p<np;p++)if(pr[p].y>pr[top].y)top=p;
+  if(g.attributes.normal.getY(top)>0){for(let t=0;t<ind.length;t+=3){const s=ind[t+1];ind[t+1]=ind[t+2];ind[t+2]=s;}g.setIndex(ind);g.computeVertexNormals();}
+  return g;
+}
+const THERM=[];
+function attachThermal(mesh,clip){
+  const g=mesh.geometry,p=g.attributes.position,nr=g.attributes.normal,n=p.count,map=new Int32Array(n),col=new Float32Array(n*3).fill(.5);
+  for(let v=0;v<n;v++){const x=p.getX(v)+nr.getX(v)*.6,y=p.getY(v)+nr.getY(v)*.6,z=p.getZ(v)+nr.getZ(v)*.6;
+    map[v]=DISP[id3(clamp(Math.floor(x/DX),0,NX-1),clamp(Math.floor(y/DY),0,NY-1),clamp(Math.floor((z-Z0)/DZ),0,NZ-1))];}
+  g.setAttribute('color',new THREE.BufferAttribute(col,3));
+  THERM.push({mesh,real:mesh.material,map,col,attr:g.attributes.color,clip});
+}
+function addShell(pr,x0,x1,mat){
+  const g=shellGeo(prof(pr),x0,x1,2,6,6);
+  const inner=new THREE.Mesh(g,mat);scene.add(inner);attachThermal(inner,true);
+}
+addShell(tunnelPts(0),0,X_ST0,mTunnel);
+addShell(tunnelPts(0),X_ST1,L,mTunnel);
+addShell(stationPts(0),X_ST0,X_ST1,mStation);
+
+/* headwalls */
+function headwall(x,nx){
+  const sh=new THREE.Shape(),sp=stationPts(-0.3);sh.moveTo(sp[0][0],sp[0][1]);for(let q=1;q<sp.length;q++)sh.lineTo(sp[q][0],sp[q][1]);sh.lineTo(sp[0][0],sp[0][1]);
+  const hp=tunnelPts(0).slice().reverse(),hole=new THREE.Path();hole.moveTo(hp[0][0],hp[0][1]);for(let q=1;q<hp.length;q++)hole.lineTo(hp[q][0],hp[q][1]);sh.holes.push(hole);
+  const g=new THREE.ShapeGeometry(sh,1),p=g.attributes.position,uv=g.attributes.uv,nr=g.attributes.normal;
+  for(let v=0;v<p.count;v++){const a=p.getX(v),b=p.getY(v);p.setXYZ(v,x,b,a);uv.setXY(v,a/6,b/6);nr.setXYZ(v,nx,0,0);}
+  const m=new THREE.Mesh(g,mHead);scene.add(m);attachThermal(m,true);
+}
+headwall(X_ST0,1);headwall(X_ST1,-1);
+
+/* ribs (precast lining rings) */
+for(let x=X_ST0+3;x<X_ST1-1;x+=5.5){
+  const pts=stationPts(PLAT_Y).map(p=>{const k=0.97;return V3(x,2+(p[1]-2)*k,p[0]*k);});
+  scene.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),90,.17,6,false),mRib));
+}
+/* floors and platforms */
+function gridXZ(x0,x1,z0,z1,y,nx,nz,tu){const g=new THREE.PlaneGeometry(x1-x0,z1-z0,nx,nz);g.rotateX(-Math.PI/2);g.translate((x0+x1)/2,y,(z0+z1)/2);
+  const p=g.attributes.position,uv=g.attributes.uv;for(let n=0;n<p.count;n++)uv.setXY(n,p.getX(n)/tu,p.getZ(n)/tu);return g;}
+function addFloor(g,mat){const m=new THREE.Mesh(g,mat);scene.add(m);attachThermal(m,false);return m;}
+addFloor(gridXZ(0,X_ST0,-4.5,4.5,0,105,9,4),mFloor);
+addFloor(gridXZ(X_ST1,L,-4.5,4.5,0,10,9,4),mFloor);
+addFloor(gridXZ(X_ST0,X_ST1,-PLAT_EDGE,PLAT_EDGE,0,55,6,4),mFloor);
+for(const s of [-1,1]){
+  const z0=s<0?-9:PLAT_EDGE,z1=s<0?-PLAT_EDGE:9;
+  addFloor(gridXZ(X_ST0,X_ST1,z0,z1,PLAT_Y,55,6,2.4),mPlat);
+  const body=new THREE.Mesh(new THREE.BoxGeometry(X_ST1-X_ST0,PLAT_Y-.01,z1-z0),mPlatSide);body.position.set((X_ST0+X_ST1)/2,(PLAT_Y-.01)/2,(z0+z1)/2);scene.add(body);
+  const tac=new THREE.Mesh(new THREE.BoxGeometry(X_ST1-X_ST0,.012,.4),mTactile);tac.position.set((X_ST0+X_ST1)/2,PLAT_Y+.006,s*(PLAT_EDGE+.35));scene.add(tac);
+}
+/* evacuation walkway in tunnel */
+for(const [a,b] of [[0,X_ST0],[X_ST1,L]]){const w=new THREE.Mesh(new THREE.BoxGeometry(b-a,.9,.75),mPlatSide);w.position.set((a+b)/2,.45,4.12);scene.add(w);
+  const hr=new THREE.Mesh(new THREE.BoxGeometry(b-a,.05,.05),mSteel);hr.position.set((a+b)/2,1.95,4.3);scene.add(hr);}
+/* track */
+{
+  const step=.9,n=Math.floor(L/step),sl=new THREE.InstancedMesh(new THREE.BoxGeometry(.26,.14,2.0),mSleeper,2*n),M=new THREE.Matrix4();let q=0;
+  for(const tz of [-TRACK_Z,TRACK_Z])for(let a=0;a<n;a++){M.makeTranslation(a*step+.45,.07,tz);sl.setMatrixAt(q++,M);}
+  scene.add(sl);
+  for(const tz of [-TRACK_Z,TRACK_Z])for(const o of [-.536,.536]){const r=new THREE.Mesh(new THREE.BoxGeometry(L,.14,.07),mRail);r.position.set(L/2,.21,tz+o);scene.add(r);}
+  for(const tz of [-TRACK_Z,TRACK_Z]){const w=new THREE.Mesh(new THREE.CylinderGeometry(.035,.035,L,6),mWire);w.rotation.z=Math.PI/2;w.position.set(L/2,4.5,tz);scene.add(w);
+    for(let x=4;x<L;x+=9){const top=isStationX(x)?stationTop(tz):tunnelTop(tz);const h=top-4.5-.05;const r=new THREE.Mesh(new THREE.BoxGeometry(.05,h,.05),mSteel);r.position.set(x,4.5+h/2,tz);scene.add(r);
+      const arm=new THREE.Mesh(new THREE.BoxGeometry(.06,.06,.8),mSteel);arm.position.set(x,4.55,tz);scene.add(arm);}}
+}
+/* tunnel luminaires */
+{
+  const xs=[];for(let x=6;x<L;x+=12)if(!isStationX(x))xs.push(x);
+  const im=new THREE.InstancedMesh(new THREE.BoxGeometry(1.2,.12,.16),mTunLight,xs.length),M=new THREE.Matrix4();
+  xs.forEach((x,q)=>{M.makeTranslation(x,2.7,-4.38);im.setMatrixAt(q,M);});scene.add(im);
+}
+/* station light strips along the vault */
+for(const s of [-1,1]){const z=s*4.6,y=stationTop(z)-.3;const m=new THREE.Mesh(new THREE.BoxGeometry(X_ST1-X_ST0-4,.12,.4),mLightClip);m.position.set((X_ST0+X_ST1)/2,y,z);m.rotation.x=-s*.45;scene.add(m);}
+/* signals */
+for(const [x,z] of [[204,-4.3],[326,4.3]]){const b=new THREE.Mesh(new THREE.BoxGeometry(.3,.8,.3),mUnitDark);b.position.set(x,2.6,z);scene.add(b);
+  const r=new THREE.Mesh(new THREE.SphereGeometry(.09,10,8),new THREE.MeshBasicMaterial({color:0xff3b30}));r.position.set(x+(x<250?-.17:.17),2.8,z);scene.add(r);
+  const gr=new THREE.Mesh(new THREE.SphereGeometry(.09,10,8),new THREE.MeshBasicMaterial({color:0x2fd36b}));gr.position.set(x+(x<250?-.17:.17),2.45,z);scene.add(gr);}
+/* mezzanine walkway and stairs */
+{
+  const slab=new THREE.Mesh(new THREE.BoxGeometry(4,.3,17.4),mSteel);slab.position.set(298,6.25,0);scene.add(slab);
+  for(const x of [296,300]){const g=new THREE.Mesh(new THREE.BoxGeometry(.03,1.1,17.4),mGlass);g.position.set(x,6.95,0);scene.add(g);
+    const h=new THREE.Mesh(new THREE.BoxGeometry(.07,.07,17.4),mSteel);h.position.set(x,7.52,0);scene.add(h);}
+  const ns=30,rise=(6.4-PLAT_Y)/ns,im=new THREE.InstancedMesh(new THREE.BoxGeometry(.6,.06,1.8),mSteel,ns*2),M=new THREE.Matrix4();let q=0;
+  for(const s of [-1,1]){for(let k=0;k<ns;k++){M.makeTranslation(278.3+k*.6,PLAT_Y+(k+1)*rise,s*7.7);im.setMatrixAt(q++,M);}
+    for(const e of [-.92,.92]){const sh=new THREE.Shape();sh.moveTo(278,PLAT_Y);sh.lineTo(296,6.4);sh.lineTo(296,7.5);sh.lineTo(278,PLAT_Y+1.1);sh.lineTo(278,PLAT_Y);
+      const g=new THREE.Mesh(new THREE.ShapeGeometry(sh),mGlass);g.position.z=s*7.7+e;scene.add(g);}}
+  scene.add(im);
+}
+/* passengers */
+const MAXPAX=300;
+const paxBody=new THREE.InstancedMesh(new THREE.CylinderGeometry(.19,.23,1.35,8),new THREE.MeshStandardMaterial({roughness:.85}),MAXPAX);
+const paxHead=new THREE.InstancedMesh(new THREE.SphereGeometry(.12,10,8),new THREE.MeshStandardMaterial({color:0xc9a184,roughness:.8}),MAXPAX);
+{
+  const R=rnd(31),M=new THREE.Matrix4(),C=new THREE.Color(),cloth=[0x2d3a4a,0x4a4038,0x6b2f2f,0x2f4a3a,0x8a8a8a,0x1f1f24,0x5a6f86,0xa58b5f,0x3b3352];
+  for(let q=0;q<MAXPAX;q++){let x,z;do{x=214+R()*102;z=(R()<.5?-1:1)*(3.95+R()*4.7);}while(x>274&&x<299&&Math.abs(z)>6.5);
+    M.makeTranslation(x,PLAT_Y+.675,z);paxBody.setMatrixAt(q,M);M.makeTranslation(x,PLAT_Y+1.47,z);paxHead.setMatrixAt(q,M);
+    paxBody.setColorAt(q,C.setHex(cloth[(R()*cloth.length)|0]).convertSRGBToLinear());}
+  scene.add(paxBody,paxHead);
+}
+function updatePax(){const n=Math.min(MAXPAX,Math.round(P.pax/4));paxBody.count=n;paxHead.count=n;}
+
+/* ventilation shaft + condensers */
+{
+  const h=19,yc=6.9+h/2;
+  for(const [w,d,x,z] of [[4,.3,SHAFT_X,-2],[4,.3,SHAFT_X,2],[.3,4,SHAFT_X-2,0],[.3,4,SHAFT_X+2,0]]){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mShaft);m.position.set(x,yc,z);scene.add(m);}
+  const gr=new THREE.Mesh(new THREE.PlaneGeometry(3.8,3.8),new THREE.MeshStandardMaterial({map:texGrille,side:THREE.DoubleSide}));gr.rotation.x=Math.PI/2;gr.position.set(SHAFT_X,7.0,0);scene.add(gr);
+}
+const fans=[];
+const condExt=new THREE.Group(),condInt=new THREE.Group();
+{
+  const slab=new THREE.Mesh(new THREE.BoxGeometry(11,.4,8),mPlatSide);slab.position.set(SHAFT_X,26.1,0);condExt.add(slab);
+  for(const [dx,dz] of [[-3,-1.9],[0,-1.9],[3,-1.9],[-3,1.9],[0,1.9],[3,1.9]]){
+    const b=new THREE.Mesh(new THREE.BoxGeometry(2.4,1.5,1.5),mUnit);b.position.set(SHAFT_X+dx,27.05,dz);condExt.add(b);
+    const f=new THREE.Mesh(new THREE.CircleGeometry(.62,24),mFan);f.rotation.x=-Math.PI/2;f.position.set(SHAFT_X+dx,27.81,dz);condExt.add(f);fans.push(f);
+  }
+  for(const x of [99,103,107]){
+    const b=new THREE.Mesh(new THREE.BoxGeometry(2.4,1.4,.9),mUnit);b.position.set(x,5.0,-3.25);condInt.add(b);
+    const f=new THREE.Mesh(new THREE.CircleGeometry(.55,24),mFan);f.position.set(x,5.0,-2.79);condInt.add(f);fans.push(f);
+    const br=new THREE.Mesh(new THREE.BoxGeometry(2.6,.08,.7),mSteel);br.position.set(x,4.26,-3.3);condInt.add(br);
+  }
+  scene.add(condExt,condInt);
+}
+
+/* ---------- DX units (visual) ---------- */
+const unitGroup=new THREE.Group();scene.add(unitGroup);
+function disposeGroup(g){while(g.children.length){const c=g.children.pop();c.traverse(o=>{if(o.geometry&&o.userData.own)o.geometry.dispose();if(o.material&&o.userData.ownMat)o.material.dispose();});}}
+function tube(pts,r,mat){const path=new THREE.CurvePath();for(let q=1;q<pts.length;q++)path.add(new THREE.LineCurve3(pts[q-1],pts[q]));const m=new THREE.Mesh(new THREE.TubeGeometry(path,pts.length*8,r,6,false),mat);m.userData.own=true;return m;}
+function buildUnits(){
+  PLUME.fill(-1);disposeGroup(unitGroup);
+  const lay=unitLayout();units=lay.map((u,ui)=>{const o=Object.assign({frac:0,q:0,tc:0},u);buildUnitCells(o,ui);return o;});
+  for(const u of units){
+    const st=u.where==='S',W=st?2.6:1.9,H=st?.8:.6,D=st?1.3:1.0,g=new THREE.Group();g.position.set(u.x,u.y,u.z);
+    const box=new THREE.Mesh(new THREE.BoxGeometry(W,H,D),mUnit);box.userData.own=true;g.add(box);
+    const dif=new THREE.Mesh(new THREE.BoxGeometry(W*.8,.04,D*.7),mUnitDark);dif.position.y=-H/2-.02;dif.userData.own=true;g.add(dif);
+    const top=(st?stationTop(u.z):tunnelTop(u.z))-.08,rl=top-(u.y+H/2);
+    for(const [a,b] of [[-W/2+.15,-D/2+.15],[W/2-.15,-D/2+.15],[-W/2+.15,D/2-.15],[W/2-.15,D/2-.15]]){const r=new THREE.Mesh(new THREE.CylinderGeometry(.02,.02,rl,5),mSteel);r.position.set(a,H/2+rl/2,b);r.userData.own=true;g.add(r);}
+    const led=new THREE.Mesh(new THREE.SphereGeometry(.07,10,8),new THREE.MeshBasicMaterial({color:0x445055}));led.position.set(W/2+.01,.15,0);led.userData.own=true;led.userData.ownMat=true;g.add(led);
+    const floorY=st?PLAT_Y:0,ph=u.y-H/2-floorY-.1;
+    const plume=new THREE.Mesh(new THREE.ConeGeometry(st?2.3:1.5,ph,28,1,true),new THREE.MeshBasicMaterial({color:0x5cc8ff,transparent:true,opacity:0,alphaMap:texFade,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide,toneMapped:false}));
+    plume.position.y=-H/2-ph/2;plume.userData.own=true;plume.userData.ownMat=true;g.add(plume);
+    u.led=led;u.plume=plume;unitGroup.add(g);
+  }
+  rebuildPipes();
+}
+function rebuildPipes(){
+  for(const c of unitGroup.children.filter(o=>o.userData.pipe)){unitGroup.remove(c);c.geometry.dispose();}
+  const add=(pts,r,mat)=>{const m=tube(pts,r,mat);m.userData.pipe=true;unitGroup.add(m);};
+  const ext=P.dxCond==='ext',trunkEnd=ext?[V3(SHAFT_X+1,6.75,1.1),V3(SHAFT_X+1,26.3,1.1)]:[V3(103,6.75,1.1),V3(103,6.2,-2.2),V3(103,5.75,-2.75)];
+  for(const s of [-1,1]){
+    const su=units.filter(u=>u.where==='S'&&Math.sign(u.z)===s);
+    if(su.length){const yh=stationTop(5.6)-.35,xmax=Math.max(...su.map(u=>u.x));
+      for(const u of su)add([V3(u.x,u.y+.4,u.z),V3(u.x,yh,s*5.6)],.07,mInsul);
+      add([V3(xmax,yh,s*5.6),V3(X_ST0+.6,yh,s*5.6),V3(X_ST0+.6,6.75,s*1.1),V3(X_ST0-2,6.75,s*1.1)],.11,mInsul);}
+    const tu=units.filter(u=>u.where==='T'&&Math.sign(u.z)===s);
+    for(const u of tu)add([V3(u.x,u.y+.3,u.z),V3(u.x,6.75,s*1.1)],.06,mInsul);
+  }
+  add([V3(X_ST0-2,6.75,-1.1),V3(X_ST0-2,6.75,1.1)],.11,mInsul);
+  add([V3(X_ST0-2,6.75,1.1),...trunkEnd],.13,mCopper);
+  condExt.visible=ext;condInt.visible=!ext;
+}
+
+/* ---------- trains (visual) ---------- */
+const trainProto=new THREE.Group();
+{
+  const mBody=new THREE.MeshStandardMaterial({color:0xd6dadd,metalness:.25,roughness:.42,clippingPlanes:trainClip});
+  const mWin=new THREE.MeshStandardMaterial({color:0x1b2a33,emissive:0xffd9a0,emissiveIntensity:.22,roughness:.15,metalness:.3,clippingPlanes:trainClip});
+  const mBand=new THREE.MeshStandardMaterial({color:0xc4323a,roughness:.5,clippingPlanes:trainClip});
+  const mDark=new THREE.MeshStandardMaterial({color:0x2a2f33,roughness:.8,clippingPlanes:trainClip});
+  const mDoor=new THREE.MeshStandardMaterial({color:0xaeb4b9,metalness:.3,roughness:.4,clippingPlanes:trainClip});
+  const mHL=new THREE.MeshBasicMaterial({color:0xfff6e0,clippingPlanes:trainClip}),mTL=new THREE.MeshBasicMaterial({color:0xff2a2a,clippingPlanes:trainClip});
+  const sh=new THREE.Shape();sh.moveTo(-1.4,.95);sh.lineTo(1.4,.95);sh.lineTo(1.4,3.25);sh.quadraticCurveTo(1.38,3.7,.9,3.72);sh.lineTo(-.9,3.72);sh.quadraticCurveTo(-1.38,3.7,-1.4,3.25);sh.lineTo(-1.4,.95);
+  const CL=17.5,gap=.5,body=new THREE.ExtrudeGeometry(sh,{depth:CL,bevelEnabled:false,curveSegments:6});body.rotateY(-Math.PI/2);
+  const win=new THREE.BoxGeometry(CL-2.2,.9,2.84),band=new THREE.BoxGeometry(CL-.3,.12,2.83),door=new THREE.BoxGeometry(1.3,1.95,2.86),under=new THREE.BoxGeometry(CL-1.5,.55,2.3),bog=new THREE.BoxGeometry(2.6,.5,2.2);
+  for(let c=0;c<4;c++){const x0=-c*(CL+gap);
+    const b=new THREE.Mesh(body,mBody);b.position.x=x0;trainProto.add(b);
+    const w=new THREE.Mesh(win,mWin);w.position.set(x0-CL/2,2.42,0);trainProto.add(w);
+    const bd=new THREE.Mesh(band,mBand);bd.position.set(x0-CL/2,1.62,0);trainProto.add(bd);
+    for(const f of [.2,.5,.8]){const d=new THREE.Mesh(door,mDoor);d.position.set(x0-CL*f,1.97,0);trainProto.add(d);}
+    const u=new THREE.Mesh(under,mDark);u.position.set(x0-CL/2,.68,0);trainProto.add(u);
+    for(const f of [.15,.85]){const g=new THREE.Mesh(bog,mDark);g.position.set(x0-CL*f,.42,0);trainProto.add(g);}
+  }
+  const endL=-(4*CL+3*gap);
+  const cab=new THREE.Mesh(new THREE.BoxGeometry(.25,1.0,2.2),mWin);cab.position.set(.13,2.6,0);trainProto.add(cab);
+  const cab2=cab.clone();cab2.position.x=endL-.13;trainProto.add(cab2);
+  for(const z of [-.9,.9]){const h=new THREE.Mesh(new THREE.SphereGeometry(.11,10,8),mHL);h.position.set(.05,1.45,z);trainProto.add(h);
+    const t=new THREE.Mesh(new THREE.SphereGeometry(.09,10,8),mTL);t.position.set(endL-.05,1.45,z);trainProto.add(t);}
+}
+function updateTrainMeshes(alpha){
+  for(const tr of trains){
+    if(!tr.mesh){tr.mesh=trainProto.clone();scene.add(tr.mesh);}
+    const s=tr.sPrev+(tr.s-tr.sPrev)*alpha;
+    if(tr.dir>0){tr.mesh.position.set(s,0,-TRACK_Z);tr.mesh.rotation.y=0;}else{tr.mesh.position.set(L-s,0,TRACK_Z);tr.mesh.rotation.y=Math.PI;}
+  }
+}
+
+/* ---------- temperature slices ---------- */
+const VS=`varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`;
+const FS=`uniform sampler2D tmap;uniform float opacity,tmin,tmax;varying vec2 vUv;
+vec3 turbo(float x){x=clamp(x,0.0,1.0);vec4 v4=vec4(1.0,x,x*x,x*x*x);vec2 v2=v4.zw*v4.z;
+return vec3(dot(v4,vec4(0.13572138,4.61539260,-42.66032258,132.13108234))+dot(v2,vec2(-152.94239396,59.28637943)),
+dot(v4,vec4(0.09140261,2.19418839,4.84296658,-14.18503333))+dot(v2,vec2(4.27729857,2.82956604)),
+dot(v4,vec4(0.10667330,12.64194608,-60.58204836,110.36276771))+dot(v2,vec2(-89.90310912,27.34824973)));}
+void main(){float t=texture2D(tmap,vUv).r;vec3 c=clamp(turbo(t),0.0,1.0);float T=tmin+t*(tmax-tmin);
+float f=fract(T);float d=min(f,1.0-f);float w=max(fwidth(T),1e-4);float line=1.0-smoothstep(0.6*w,1.6*w,d);
+c=mix(c,c*0.35,line*0.45);gl_FragColor=vec4(c,opacity);}`;
+function makeSlice(w,h){const data=new Uint8Array(w*h*4).fill(255);const tex=new THREE.DataTexture(data,w,h,THREE.RGBAFormat);tex.magFilter=tex.minFilter=THREE.LinearFilter;tex.needsUpdate=true;
+  const mat=new THREE.ShaderMaterial({uniforms:{tmap:{value:tex},opacity:{value:P.sliceOp},tmin:{value:TMIN},tmax:{value:TMAX}},vertexShader:VS,fragmentShader:FS,transparent:true,depthWrite:false,side:THREE.DoubleSide,extensions:{derivatives:true}});
+  const mesh=new THREE.Mesh(new THREE.BufferGeometry(),mat);mesh.renderOrder=2;scene.add(mesh);return{data,tex,mat,w,h,mesh};}
+const SLong=makeSlice(NX,NY),SHor=makeSlice(NX,NZ),SCross=makeSlice(NZ,NY);
+function rectGeo(rects){const pos=[],uv=[];for(const r of rects){const [a,b,c,d]=r.p;for(const v of [a,b,c,a,c,d]){pos.push(v[0],v[1],v[2]);const t=r.uv(v);uv.push(t[0],t[1]);}}
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));return g;}
+function rebuildLong(){
+  const z=P.zLong,rects=[],uvf=v=>[v[0]/L,v[1]/(NY*DY)];
+  const tt=tunnelTop(z);if(tt>0){for(const [a,b] of [[0,X_ST0],[X_ST1,L]])rects.push({p:[[a,0,z],[b,0,z],[b,tt,z],[a,tt,z]],uv:uvf});}
+  const st=stationTop(z);if(st>0){const bot=Math.abs(z)>=PLAT_EDGE?PLAT_Y:0;rects.push({p:[[X_ST0,bot,z],[X_ST1,bot,z],[X_ST1,st,z],[X_ST0,st,z]],uv:uvf});}
+  SLong.mesh.geometry.dispose();SLong.mesh.geometry=rectGeo(rects);
+}
+function rebuildHor(){
+  const h=P.hHoriz,rects=[],uvf=v=>[v[0]/L,(v[2]-Z0)/(NZ*DZ)];
+  const ht=h<=3?4.5:(h<7.5?Math.sqrt(20.25-(h-3)*(h-3)):0);
+  if(ht>0)for(const [a,b] of [[0,X_ST0],[X_ST1,L]])rects.push({p:[[a,h,-ht],[b,h,-ht],[b,h,ht],[a,h,ht]],uv:uvf});
+  const hs=h<PLAT_Y?PLAT_EDGE:(h<=2?9:(h<11.5?9*Math.sqrt(1-((h-2)/9.5)**2):0));
+  if(hs>0)rects.push({p:[[X_ST0,h,-hs],[X_ST1,h,-hs],[X_ST1,h,hs],[X_ST0,h,hs]],uv:uvf});
+  SHor.mesh.geometry.dispose();SHor.mesh.geometry=rectGeo(rects);
+}
+function rebuildCross(){
+  const x=P.xCross,sh=new THREE.Shape();let pts;
+  if(isStationX(x)){pts=[[-PLAT_EDGE,0],[-PLAT_EDGE,PLAT_Y],[-9,PLAT_Y],[-9,2]];for(let n=1;n<60;n++){const t=Math.PI-Math.PI*n/60;pts.push([9*Math.cos(t),2+9.5*Math.sin(t)]);}pts.push([9,2],[9,PLAT_Y],[PLAT_EDGE,PLAT_Y],[PLAT_EDGE,0]);}
+  else pts=tunnelPts(0);
+  sh.moveTo(pts[0][0],pts[0][1]);for(let q=1;q<pts.length;q++)sh.lineTo(pts[q][0],pts[q][1]);sh.lineTo(pts[0][0],pts[0][1]);
+  const g=new THREE.ShapeGeometry(sh),p=g.attributes.position,uv=g.attributes.uv;
+  for(let v=0;v<p.count;v++){const a=p.getX(v),b=p.getY(v);p.setXYZ(v,x,b,a);uv.setXY(v,(a-Z0)/(NZ*DZ),b/(NY*DY));}
+  SCross.mesh.geometry.dispose();SCross.mesh.geometry=g;
+}
+const viewSim=()=>P.view==='A'?simA:simB;
+function fillSlices(){
+  const T=viewSim().T;
+  if(P.sLong){const d=SLong.data,kf=clamp((P.zLong-Z0)/DZ-.5,0,NZ-1),k0=Math.floor(kf),k1=Math.min(NZ-1,k0+1),f=kf-k0;
+    for(let j=0;j<NY;j++)for(let i=0;i<NX;i++){const a=T[DISP[id3(i,j,k0)]],b=T[DISP[id3(i,j,k1)]];d[(j*NX+i)*4]=tI(a+(b-a)*f);}SLong.tex.needsUpdate=true;}
+  if(P.sHoriz){const d=SHor.data,jf=clamp(P.hHoriz/DY-.5,0,NY-1),j0=Math.floor(jf),j1=Math.min(NY-1,j0+1),f=jf-j0;
+    for(let k=0;k<NZ;k++)for(let i=0;i<NX;i++){const a=T[DISP[id3(i,j0,k)]],b=T[DISP[id3(i,j1,k)]];d[(k*NX+i)*4]=tI(a+(b-a)*f);}SHor.tex.needsUpdate=true;}
+  if(P.sCross){const d=SCross.data,fi=clamp(P.xCross/DX-.5,0,NX-1),i0=Math.floor(fi),i1=Math.min(NX-1,i0+1),f=fi-i0;
+    for(let j=0;j<NY;j++)for(let k=0;k<NZ;k++){const a=T[DISP[id3(i0,j,k)]],b=T[DISP[id3(i1,j,k)]];d[(j*NZ+k)*4]=tI(a+(b-a)*f);}SCross.tex.needsUpdate=true;}
+}
+function sliceVis(){SLong.mesh.visible=P.sLong;SHor.mesh.visible=P.sHoriz;SCross.mesh.visible=P.sCross;for(const s of [SLong,SHor,SCross])s.mat.uniforms.opacity.value=P.sliceOp;}
+
+/* ---------- thermal surfaces ---------- */
+function setThermal(on){for(const t of THERM)t.mesh.material=on?(t.clip?thermalClip:thermalFree):t.real;hemi.intensity=on?1.15:.6;if(on)updateThermal();}
+function updateThermal(){const T=viewSim().T;for(const t of THERM){const m=t.map,c=t.col;for(let v=0;v<m.length;v++){const n=tI(T[m[v]])*3;c[v*3]=LUTL[n];c[v*3+1]=LUTL[n+1];c[v*3+2]=LUTL[n+2];}t.attr.needsUpdate=true;}}
+
+/* ---------- air particles ---------- */
+const NP=2600,PP=new Float32Array(NP*3),PC=new Float32Array(NP*3),PA=new Float32Array(NP);
+const pGeo=new THREE.BufferGeometry();pGeo.setAttribute('position',new THREE.BufferAttribute(PP,3));pGeo.setAttribute('color',new THREE.BufferAttribute(PC,3));
+const pts=new THREE.Points(pGeo,new THREE.PointsMaterial({size:.32,map:texDot,vertexColors:true,transparent:true,opacity:.9,depthWrite:false,sizeAttenuation:true,toneMapped:false}));
+pts.frustumCulled=false;pts.renderOrder=3;scene.add(pts);
+function respawn(p){const c=CELLS[(Math.random()*NC)|0],i=(c/SL)|0,r=c-i*SL,j=(r/NZ)|0,k=r-j*NZ;
+  PP[p*3]=(i+Math.random())*DX;PP[p*3+1]=(j+Math.random())*DY;PP[p*3+2]=Z0+(k+Math.random())*DZ;PA[p]=4+Math.random()*10;}
+for(let p=0;p<NP;p++)respawn(p);
+function updateParticles(dt){
+  pts.visible=P.particles;if(!P.particles)return;
+  const sim=viewSim(),T=sim.T,avg=sim.avg,Q=uAir*AREA[0],vis=4,useDX=P.view==='A';
+  for(let p=0;p<NP;p++){
+    let x=PP[p*3],y=PP[p*3+1],z=PP[p*3+2];PA[p]-=dt;
+    const i=Math.floor(x/DX),j=Math.floor(y/DY),k=Math.floor((z-Z0)/DZ);
+    if(PA[p]<=0||i<0||i>=NX||j<0||j>=NY||k<0||k>=NZ||!FLUID[id3(i,j,k)]){respawn(p);continue;}
+    const c=id3(i,j,k),t=T[c];let w=clamp(.25*(t-avg[i]),-.5,.5);
+    const pu=PLUME[c];if(useDX&&pu>=0&&units[pu])w-=1.5*units[pu].frac;
+    x+=Q/AREA[i]*dt*vis;y+=w*dt*vis;z+=(Math.random()-.5)*.9*dt*vis;
+    PP[p*3]=x;PP[p*3+1]=y;PP[p*3+2]=z;const n=tI(t)*3;PC[p*3]=LUTL[n];PC[p*3+1]=LUTL[n+1];PC[p*3+2]=LUTL[n+2];
+  }
+  pGeo.attributes.position.needsUpdate=true;pGeo.attributes.color.needsUpdate=true;
+}
+
+/* ---------- labels ---------- */
+const LBL=[
+  {t:'Túnel de línea · vía doble',p:()=>V3(95,9.4,-1)},
+  {t:'Estación en caverna',p:()=>V3(258,13.6,-1)},
+  {t:'Pozo de ventilación',p:()=>V3(SHAFT_X,21,0)},
+  {t:'Condensadoras DX',p:()=>P.dxCond==='ext'?V3(SHAFT_X,29.3,0):V3(103,6.6,-3)},
+  {t:'Unidades interiores DX',p:()=>{const u=units.find(v=>v.where==='S');return u?V3(u.x,u.y+1.4,u.z):V3(240,8,0);}},
+  {t:'Pasarela',p:()=>V3(298,8.2,0)},
+  {t:'Entrada de aire',p:()=>uAir>=0?V3(3,6,0):V3(L-3,6,0)}
+];
+const lblLayer=$('#labels');for(const l of LBL){l.el=document.createElement('div');l.el.className='lbl';l.el.textContent=l.t;lblLayer.appendChild(l.el);}
+const tmpV=new THREE.Vector3();
+function updateLabels(w,h){
+  lblLayer.style.display=P.labels?'':'none';if(!P.labels)return;
+  for(const l of LBL){tmpV.copy(l.p()).project(camera);const vis=tmpV.z<1&&tmpV.z>-1&&Math.abs(tmpV.x)<1.05&&Math.abs(tmpV.y)<1.05;
+    l.el.style.display=vis?'':'none';if(vis)l.el.style.transform=`translate(${((tmpV.x+1)/2*w).toFixed(1)}px,${((1-tmpV.y)/2*h).toFixed(1)}px)`;}
+}
+
+/* ---------- camera views ---------- */
+const VIEWS={
+  general:{p:[150,48,92],t:[232,3,-1],cut:true},
+  anden:{p:[222,4.3,6.6],t:[292,3.4,3.0],cut:false},
+  tunel:{p:[148,5.1,0],t:[214,4.2,0],cut:false},
+  seccion:{p:[226,6.2,.01],t:[262,5.6,0],cut:false,cross:true}
+};
+let tween=null;
+function goView(name){
+  const v=VIEWS[name];if(!v)return;
+  if(P.cut!==v.cut){P.cut=v.cut;$('#cut').checked=v.cut;applyCut();}
+  if(v.cross){P.sCross=true;$('#sCross').checked=true;P.xCross=262;$('#xCross').value=262;showOut('xCross');rebuildCross();sliceVis();}
+  const p1=V3(...v.p),t1=V3(...v.t);
+  if(reduceMotion){camera.position.copy(p1);controls.target.copy(t1);}
+  else tween={k:0,p0:camera.position.clone(),t0:controls.target.clone(),p1,t1};
+}
+controls.addEventListener('start',()=>{tween=null;});
+
+/* ---------- hover readout ---------- */
+const ray=new THREE.Raycaster(),mouse=new THREE.Vector2(),tip=$('#tip');let hoverEv=null;
+canvas.addEventListener('pointermove',e=>{hoverEv=e;});
+canvas.addEventListener('pointerleave',()=>{hoverEv=null;tip.hidden=true;});
+function updateHover(){
+  if(!hoverEv)return;const r=canvas.getBoundingClientRect();
+  mouse.set((hoverEv.clientX-r.left)/r.width*2-1,-((hoverEv.clientY-r.top)/r.height)*2+1);ray.setFromCamera(mouse,camera);
+  const objs=[SLong,SHor,SCross].filter(s=>s.mesh.visible).map(s=>s.mesh);const hit=ray.intersectObjects(objs,false)[0];
+  if(!hit){tip.hidden=true;return;}
+  const p=hit.point,i=clamp(Math.floor(p.x/DX),0,NX-1),j=clamp(Math.floor(p.y/DY),0,NY-1),k=clamp(Math.floor((p.z-Z0)/DZ),0,NZ-1);
+  const T=viewSim().T[DISP[id3(i,j,k)]],st=isStationX(p.x),hh=st&&Math.abs(p.z)>PLAT_EDGE?p.y-PLAT_Y:p.y;
+  tip.innerHTML=`<b>${fmt(T,1)} °C</b><br>PK ${fmt(p.x,0)} m · ${st?'estación':'túnel'}<br>altura ${fmt(hh,1)} m${st&&Math.abs(p.z)>PLAT_EDGE?' s/andén':''}`;
+  tip.hidden=false;const x=hoverEv.clientX-r.left+14,y=hoverEv.clientY-r.top+14;tip.style.left=Math.min(x,r.width-170)+'px';tip.style.top=Math.min(y,r.height-70)+'px';
+}
+
+/* ---------- readout ---------- */
+const CSS=getComputedStyle(document.documentElement);
+const COL={cold:CSS.getPropertyValue('--cold').trim()||'#66ccff',hot:CSS.getPropertyValue('--hot').trim()||'#ff8c4a',dim:CSS.getPropertyValue('--dim').trim()||'#5f707a',line:CSS.getPropertyValue('--line').trim()||'#24323b',muted:CSS.getPropertyValue('--muted').trim()||'#8d9ea8',mono:CSS.getPropertyValue('--f-mono').trim()||'monospace'};
+function setupCv(cv){const r=cv.getBoundingClientRect(),d=Math.min(2,window.devicePixelRatio||1),w=Math.max(10,Math.round(r.width*d)),h=Math.max(10,Math.round(r.height*d));if(cv.width!==w||cv.height!==h){cv.width=w;cv.height=h;}const ctx=cv.getContext('2d');ctx.setTransform(d,0,0,d,0,0);ctx.clearRect(0,0,r.width,r.height);return{ctx,w:r.width,h:r.height};}
+function niceRange(vals,extra){let lo=Math.min(...vals,...extra),hi=Math.max(...vals,...extra);lo=Math.floor(lo-.4);hi=Math.ceil(hi+.4);if(hi-lo<4){const m=(hi+lo)/2;lo=Math.floor(m-2);hi=lo+4;}return[lo,hi];}
+function axisY(ctx,m,w,ph,lo,hi,Y){ctx.font=`10px ${COL.mono}`;ctx.fillStyle=COL.muted;ctx.textAlign='right';ctx.textBaseline='middle';const st=hi-lo>8?2:1;
+  for(let t=lo;t<=hi;t+=st){const y=Y(t);ctx.strokeStyle=COL.line;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(m.l,y+.5);ctx.lineTo(w-m.r,y+.5);ctx.stroke();ctx.fillText(t+'°',m.l-5,y);}}
+function profileOf(sim){const out=new Float32Array(NX);for(let i=0;i<NX;i++){const r=EYE[i];let s=0;for(let q=0;q<r.length;q++)s+=sim.T[r[q]];out[i]=s/r.length;}return out;}
+function drawProfile(){
+  const {ctx,w,h}=setupCv($('#cProf')),m={l:30,r:6,t:8,b:18},pw=w-m.l-m.r,ph=h-m.t-m.b;
+  const a=profileOf(simA),b=profileOf(simB),[lo,hi]=niceRange([...a,...b],[P.tBase]);
+  const X=x=>m.l+x/L*pw,Y=t=>m.t+(hi-t)/(hi-lo)*ph;
+  ctx.fillStyle='rgba(102,204,255,.06)';ctx.fillRect(X(X_ST0),m.t,X(X_ST1)-X(X_ST0),ph);
+  axisY(ctx,m,w,ph,lo,hi,Y);
+  ctx.textAlign='center';ctx.textBaseline='top';ctx.fillStyle=COL.muted;for(const x of [0,100,200,300])ctx.fillText(x+' m',X(x),h-m.b+5);
+  ctx.textBaseline='top';ctx.fillStyle=COL.dim;ctx.fillText('ESTACIÓN',X((X_ST0+X_ST1)/2),m.t+2);ctx.fillText('TÚNEL',X(105),m.t+2);
+  ctx.setLineDash([4,4]);ctx.strokeStyle=COL.dim;ctx.beginPath();ctx.moveTo(m.l,Y(P.tBase));ctx.lineTo(w-m.r,Y(P.tBase));ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle=COL.cold;for(const u of units)ctx.fillRect(X(u.x)-1,m.t+ph-5,2,5);
+  for(const [arr,c] of [[b,COL.hot],[a,COL.cold]]){ctx.strokeStyle=c;ctx.lineWidth=1.8;ctx.beginPath();for(let i=0;i<NX;i++){const x=X(cxI(i)),y=Y(arr[i]);i?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.stroke();}
+}
+function drawHist(){
+  const {ctx,w,h}=setupCv($('#cHist')),m={l:30,r:6,t:8,b:18},pw=w-m.l-m.r,ph=h-m.t-m.b;
+  if(!HIST.length)return;
+  const tMax=Math.max(900,HIST[HIST.length-1].t),t0=Math.max(0,tMax-7200),hs=HIST.filter(s=>s.t>=t0);
+  const [lo,hi]=niceRange(hs.flatMap(s=>[s.a,s.b]),[P.dxSet]);
+  const X=t=>m.l+(t-t0)/(tMax-t0)*pw,Y=v=>m.t+(hi-v)/(hi-lo)*ph;
+  axisY(ctx,m,w,ph,lo,hi,Y);
+  ctx.textAlign='center';ctx.textBaseline='top';ctx.fillStyle=COL.muted;const span=(tMax-t0)/60,st=span>60?20:span>30?10:5;
+  for(let mi=Math.ceil(t0/60/st)*st;mi<=tMax/60;mi+=st)ctx.fillText(mi+' min',X(mi*60),h-m.b+5);
+  ctx.setLineDash([4,4]);ctx.strokeStyle=COL.dim;ctx.beginPath();ctx.moveTo(m.l,Y(P.dxSet));ctx.lineTo(w-m.r,Y(P.dxSet));ctx.stroke();ctx.setLineDash([]);
+  for(const [key,c] of [['b',COL.hot],['a',COL.cold]]){ctx.strokeStyle=c;ctx.lineWidth=1.8;ctx.beginPath();hs.forEach((s,q)=>{const x=X(s.t),y=Y(s[key]);q?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
+    const e=hs[hs.length-1];ctx.fillStyle=c;ctx.beginPath();ctx.arc(X(e.t),Y(e[key]),3,0,7);ctx.fill();}
+}
+const sgn=v=>(v>0?'+':v<0?'−':'±')+fmt(Math.abs(v),1);
+function updateKPI(){
+  const pa=meanOf(simA,PLAT),pb=meanOf(simB,PLAT),ta=meanOf(simA,TUN),tb=meanOf(simB,TUN),ra=meanOf(simA,ROOF),rb=meanOf(simB,ROOF);
+  $('#kPlat').textContent=fmt(pa,1)+' °C';
+  $('#kPlatSub').innerHTML=`Sin DX <em>${fmt(pb,1)} °C</em> · Δ ${sgn(pa-pb)} K · vs base ${sgn(pa-P.tBase)} K`;
+  $('#kTun').textContent=fmt(ta,1)+' °C';$('#kTunSub').innerHTML=`sin DX <em>${fmt(tb,1)}</em>`;
+  $('#kTop').textContent=fmt(ra,1)+' °C';$('#kTopSub').innerHTML=`sin DX <em>${fmt(rb,1)}</em>`;
+  const qs=simA.q/1000,capS=P.dxCap*P.dxShr,qt=qs/P.dxShr,el=qt/P.dxEer,cond=qt+el;
+  $('#kQ').textContent=fmt(qs,0)+' kW';$('#kQSub').textContent=`de ${fmt(capS,0)} · total ${fmt(qt,0)} kW`;
+  $('#kE').textContent=fmt(el,0)+' kW';$('#kESub').textContent=`EER ${fmt(P.dxEer,1)}`;
+  $('#kC').textContent=fmt(cond,0)+' kW';$('#kCSub').innerHTML=P.dxCond==='ext'?'al exterior por el pozo':'<em>dentro del túnel</em>';
+  $('#kU').textContent=fmt(uAir,2)+' m/s';$('#kUSub').textContent=`${fmt(uAir*AREA[0],0)} m³/s · ${trains.filter(t=>{const [lo,hi]=trainX(t,t.s);return hi>0&&lo<L;}).length} trenes`;
+  const st=$('#status'),fr=units.length?units.reduce((s,u)=>s+u.frac,0)/units.length:0;let s,txt;
+  if(!P.dxOn){s='off';txt='Equipo DX parado';}
+  else if(pa<=P.dxSet+.6){s='ok';txt=`Consigna alcanzada · ${fmt(fr*100,0)} % de carga`;}
+  else if(fr>.95){s='warn';txt='Capacidad al 100 % sin alcanzar la consigna';}
+  else{s='cool';txt=`Enfriando · ${fmt(fr*100,0)} % de carga`;}
+  st.dataset.s=s;$('#statusTxt').textContent=txt;
+  const tt=Math.max(0,simTime),hh=Math.floor(tt/3600),mm=Math.floor(tt%3600/60),ss=Math.floor(tt%60);
+  $('#clockT').textContent=(hh?hh+':':'')+String(mm).padStart(2,'0')+':'+String(ss).padStart(2,'0');
+  $('#legField').textContent=P.view==='A'?'Con DX':'Sin DX';
+}
+$('#nCells').textContent=NC.toLocaleString('es-ES');
+
+/* ---------- UI bindings ---------- */
+const RANGES={tBase:['°C',1],tWall:['°C',1],vAir:['m/s',1],tph:['',0],pax:['',0],regen:['%',0],dxCap:['kW',0],dxUnits:['',0],dxSet:['°C',1],dxSupply:['°C',1],dxFlow:['m³/s',1],dxShr:['',2],dxEer:['',1],hHoriz:['m',2],zLong:['m',2],xCross:['m',0],sliceOp:['',2]};
+function showOut(id){const [u,d]=RANGES[id];$('#o-'+id).textContent=fmt(P[id],d)+(u?' '+u:'');}
+for(const id of Object.keys(RANGES)){const el=$('#'+id);el.value=P[id];showOut(id);
+  el.addEventListener('input',()=>{P[id]=+el.value;showOut(id);
+    if(id==='pax'){rebuildStatic();updatePax();}
+    else if(id==='dxUnits'){const fr=units.length?units.reduce((s,u)=>s+u.frac,0)/units.length:0;buildUnits();for(const u of units)u.frac=fr;}
+    else if(id==='zLong')rebuildLong();else if(id==='hHoriz')rebuildHor();else if(id==='xCross')rebuildCross();else if(id==='sliceOp')sliceVis();
+    fillSlices();});}
+for(const id of ['sLong','sHoriz','sCross','particles','thermal','cut','labels']){const el=$('#'+id);el.checked=P[id];
+  el.addEventListener('change',()=>{P[id]=el.checked;if(id==='cut')applyCut();else if(id==='thermal')setThermal(P.thermal);else sliceVis();fillSlices();});}
+document.querySelectorAll('.seg').forEach(seg=>{const key=seg.dataset.key;seg.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+  seg.querySelectorAll('button').forEach(o=>o.setAttribute('aria-pressed',String(o===b)));
+  P[key]=key==='speed'?+b.dataset.v:b.dataset.v;
+  if(key==='dxPlace')buildUnits();else if(key==='dxCond')rebuildPipes();else if(key==='view'){fillSlices();if(P.thermal)updateThermal();updateKPI();}
+}));});
+$('#dxOn').addEventListener('click',()=>{P.dxOn=!P.dxOn;$('#dxOn').setAttribute('aria-pressed',String(P.dxOn));$('#dxOnTxt').textContent=P.dxOn?'EN MARCHA':'PARADO';updateKPI();});
+$('#play').addEventListener('click',()=>{P.playing=!P.playing;$('#play').textContent=P.playing?'Pausa':'Reanudar';});
+$('#ff').addEventListener('click',()=>{for(let n=0;n<600/DT;n++)simStep(DT,false);for(const t of trains)t.sPrev=t.s;fillSlices();if(P.thermal)updateThermal();updateKPI();drawProfile();drawHist();});
+$('#reset').addEventListener('click',()=>{resetSim();fillSlices();if(P.thermal)updateThermal();updateKPI();drawProfile();drawHist();});
+document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>goView(b.dataset.view)));
+
+/* ---------- resize & loop ---------- */
+let VW=1,VH=1;
+function resize(){const r=vp.getBoundingClientRect();VW=Math.max(1,r.width);VH=Math.max(1,r.height);renderer.setSize(VW,VH,false);camera.aspect=VW/VH;camera.updateProjectionMatrix();drawProfile();drawHist();}
+new ResizeObserver(resize).observe(vp);
+let last=performance.now(),frame=0,acc=0,lastUI=0,fanRot=0;
+const MAXSTEPS=36;
+function loop(now){
+  requestAnimationFrame(loop);
+  const dtR=Math.min(.1,(now-last)/1000);last=now;frame++;
+  if(P.playing){acc+=dtR*P.speed;let n=Math.floor(acc/DT);if(n>MAXSTEPS){n=MAXSTEPS;acc=0;}else acc-=n*DT;for(let q=0;q<n;q++)simStep(DT,false);}
+  if(tween){tween.k=Math.min(1,tween.k+dtR/1.4);const e=tween.k<.5?2*tween.k*tween.k:1-Math.pow(-2*tween.k+2,2)/2;camera.position.lerpVectors(tween.p0,tween.p1,e);controls.target.lerpVectors(tween.t0,tween.t1,e);if(tween.k>=1)tween=null;}
+  controls.update();
+  updateTrainMeshes(P.playing?clamp(acc/DT,0,1):1);
+  const fr=units.length?units.reduce((s,u)=>s+u.frac,0)/units.length:0;fanRot+=dtR*14*fr;for(const f of fans)f.rotation.z=fanRot;
+  for(const u of units){const on=u.frac>.02;u.led.material.color.setHex(on?0x66ccff:(P.dxOn?0x3ddc84:0x445055));u.plume.material.opacity=P.view==='A'?.2*u.frac:0;}
+  updateParticles(dtR);
+  if(frame%3===0)fillSlices();
+  if(P.thermal&&frame%8===0)updateThermal();
+  if(now-lastUI>450){lastUI=now;updateKPI();drawProfile();drawHist();}
+  updateHover();
+  renderer.render(scene,camera);
+  updateLabels(VW,VH);
+}
+
+/* ---------- init ---------- */
+rebuildStatic();updatePax();buildUnits();rebuildLong();rebuildHor();rebuildCross();sliceVis();applyCut();resize();
+setTimeout(()=>{resetSim();fillSlices();updateKPI();drawProfile();drawHist();$('#loading').hidden=true;requestAnimationFrame(loop);},40);
+})();
+</script>
+
+</body>
+</html>
